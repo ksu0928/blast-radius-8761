@@ -102,21 +102,10 @@ export default function Page() {
   const [flags, setFlags] = useState<FlaggedItem[]>([])
 
   useEffect(() => {
-    // WebMCP is optional. Check the document policy before touching the
-    // guarded API; reading modelContext while the feature is disallowed
-    // causes Chromium to emit a NotAllowedError even when caught later.
-    const policy = (document as Document & { permissionsPolicy?: { allowsFeature?: (feature: string) => boolean } }).permissionsPolicy
-    const webMcpAllowed = policy?.allowsFeature?.('tools') ?? false
-    if (webMcpAllowed) {
-      try {
-        const modelContext = (document as Document & { modelContext?: { registerTool?: (tool: unknown) => unknown } }).modelContext
-        if (modelContext?.registerTool) {
-          const register = (tool: unknown) => { try { return Promise.resolve(modelContext.registerTool?.(tool)).catch(() => undefined) } catch { return Promise.resolve(undefined) } }
-          void register({ name: 'trace_blast_radius', description: 'Trace npm dependency blast radius', inputSchema: { type: 'object', properties: { packageName: { type: 'string' } }, required: ['packageName'] }, execute: ({ packageName }: { packageName: string }) => { const next = packageName.toLowerCase().includes('event-stream') ? eventStream : fallback(packageName); window.dispatchEvent(new CustomEvent('blastradius:render', { detail: next })); return `Trace complete: ${next.packagesAffected} packages affected and ${next.servicesExposed} services exposed.` } })
-          void register({ name: 'flag_dependency_for_review', description: 'Flag a dependency for review', inputSchema: { type: 'object', properties: { packageName: { type: 'string' }, reason: { type: 'string' }, severity: { type: 'string' } }, required: ['packageName', 'reason', 'severity'] }, execute: (payload: { packageName: string; reason: string; severity: string }) => { window.dispatchEvent(new CustomEvent('blastradius:flag', { detail: payload })); return `Flagged ${payload.packageName} for review.` } })
-        }
-      } catch { /* Unsupported or policy-blocked WebMCP is non-fatal. */ }
-    }
+    // The preview iframe denies the WebMCP "tools" feature. Do not probe or
+    // register modelContext here: even a guarded access can trigger Chromium's
+    // permissions-policy rejection before JavaScript can catch it. The app's
+    // local event bridge remains available for supported host integrations.
     const handleRender = (event: Event) => { const detail = (event as CustomEvent<TraceResult>).detail; setResult(detail); setQuery(`${detail.packageName}@${detail.version}`); setDashboard(true) }
     const handleFlag = (event: Event) => { const detail = (event as CustomEvent<{ packageName: string; reason: string; severity: string }>).detail; setFlags((current) => [{ packageName: detail.packageName, reason: detail.reason, severity: (detail.severity.toLowerCase() as Severity) || 'medium', timestamp: 'just now' }, ...current]) }
     window.addEventListener('blastradius:render', handleRender); window.addEventListener('blastradius:flag', handleFlag)
