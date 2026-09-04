@@ -1,121 +1,36 @@
 'use client'
 
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useState } from 'react'
 
-type Severity = 'critical' | 'high' | 'medium' | 'low'
+type Feature = { title: string; body: string; icon: string }
 
-type GraphNode = {
-  id: string
-  label: string
-  kind: 'package' | 'service' | 'source'
-  severity: Severity
-  x: number
-  y: number
-  detail: string
-}
+const features: Feature[] = [
+  { title: 'Blast radius query', body: 'Full transitive closure from any package or version, returning affected packages, exposed services and the shortest path to each.', icon: '◎' },
+  { title: 'Typosquat detection', body: 'Edit-distance and keyboard-adjacency scoring against the popular-package set. 91.0% F1 across a 45-case labelled benchmark.', icon: '⌕' },
+  { title: 'Maintainer risk scoring', body: 'Publish cadence, account age, package concentration and shared infrastructure, scored 0–100 per maintainer.', icon: '♙' },
+  { title: 'Cross-ecosystem correlation', body: 'Matches npm maintainers to PyPI identities by email and GitHub handle, then multiplies the radius across both registries.', icon: '↗' },
+  { title: 'CI/CD persistence tracking', body: 'Models config-file infection as first-class graph edges and estimates how long a foothold survives after the package is pulled.', icon: '⌁' },
+  { title: 'Compromise simulation', body: 'Assume any package is owned tomorrow and read the resulting exposure before it happens. Useful for pinning and vendor review.', icon: '⊞' },
+]
 
-type TraceResult = {
-  packageName: string
-  version: string
-  packagesAffected: number
-  servicesExposed: number
-  multiplier: string
-  maintainerRisk: number
-  updated: string
-  path: string[]
-  nodes: GraphNode[]
-  edges: [string, string][]
-}
-
-type FlaggedItem = {
-  packageName: string
-  reason: string
-  severity: Severity
-  timestamp: string
-}
-
-const eventStream: TraceResult = {
-  packageName: 'event-stream',
-  version: '3.3.6',
-  packagesAffected: 21,
-  servicesExposed: 7,
-  multiplier: '2.73x',
-  maintainerRisk: 85,
-  updated: 'just now',
-  path: ['event-stream', 'flatmap-stream', 'ledger-core', 'payments-api'],
-  nodes: [
-    { id: 'event-stream', label: 'event-stream', kind: 'source', severity: 'critical', x: 16, y: 48, detail: '3.3.6 · direct dependency' },
-    { id: 'flatmap-stream', label: 'flatmap-stream', kind: 'package', severity: 'critical', x: 36, y: 28, detail: '0.1.1 · malicious payload' },
-    { id: 'lodash', label: 'lodash', kind: 'package', severity: 'low', x: 36, y: 72, detail: '4.17.21 · transitive' },
-    { id: 'ledger-core', label: 'ledger-core', kind: 'package', severity: 'high', x: 56, y: 28, detail: '2.4.0 · payment surface' },
-    { id: 'ui-kit', label: 'ui-kit', kind: 'package', severity: 'medium', x: 56, y: 74, detail: '8.12.2 · shared package' },
-    { id: 'payments-api', label: 'payments-api', kind: 'service', severity: 'critical', x: 78, y: 26, detail: 'production · exposed' },
-    { id: 'checkout-web', label: 'checkout-web', kind: 'service', severity: 'high', x: 78, y: 52, detail: 'production · exposed' },
-    { id: 'internal-tools', label: 'internal-tools', kind: 'service', severity: 'low', x: 78, y: 78, detail: 'staging · monitored' },
-  ],
-  edges: [
-    ['event-stream', 'flatmap-stream'], ['event-stream', 'lodash'], ['flatmap-stream', 'ledger-core'], ['lodash', 'ui-kit'],
-    ['ledger-core', 'payments-api'], ['ledger-core', 'checkout-web'], ['ui-kit', 'checkout-web'], ['ui-kit', 'internal-tools'],
-  ],
-}
-
-const fallback = (packageName: string): TraceResult => ({
-  ...eventStream,
-  packageName: packageName.split('@')[0] || 'unknown-package',
-  version: packageName.includes('@') ? packageName.split('@').pop() || 'latest' : 'latest',
-  packagesAffected: 0,
-  servicesExposed: 0,
-  multiplier: '0.00x',
-  maintainerRisk: 12,
-  updated: 'no trace found',
-  path: [packageName.split('@')[0] || 'unknown-package', 'no known dependents'],
-  nodes: [{ id: 'unknown', label: packageName.split('@')[0] || 'unknown-package', kind: 'source', severity: 'low', x: 50, y: 50, detail: 'No downstream data available' }],
-  edges: [],
-})
-
-const severityColor: Record<Severity, string> = {
-  critical: '#ff4d5f',
-  high: '#ff9d42',
-  medium: '#f6cf59',
-  low: '#58d6b4',
-}
-
-function Graph({ result, onFlag }: { result: TraceResult; onFlag: () => void }) {
-  const byId = useMemo(() => Object.fromEntries(result.nodes.map((node) => [node.id, node])), [result.nodes])
-  return (
-    <div className="graph-wrap">
-      <div className="graph-head"><div><span className="eyebrow">DEPENDENCY TOPOLOGY</span><h2>Impact surface</h2></div><button className="ghost-button" onClick={onFlag}>Flag selected package</button></div>
-      <svg className="dependency-graph" viewBox="0 0 100 100" role="img" aria-label={`Dependency graph for ${result.packageName}`} preserveAspectRatio="none">
-        <defs><filter id="node-glow"><feGaussianBlur stdDeviation="1.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
-        {result.edges.map(([from, to]) => { const a = byId[from]; const b = byId[to]; return a && b ? <line key={`${from}-${to}`} x1={`${a.x}%`} y1={`${a.y}%`} x2={`${b.x}%`} y2={`${b.y}%`} className="graph-edge" /> : null })}
-        {result.nodes.map((node) => <g key={node.id} className="graph-node" tabIndex={0}><circle cx={`${node.x}%`} cy={`${node.y}%`} r={node.kind === 'source' ? 3.2 : 2.3} fill={severityColor[node.severity]} filter="url(#node-glow)"/><circle cx={`${node.x}%`} cy={`${node.y}%`} r={node.kind === 'source' ? 5.4 : 4.2} fill="none" stroke={severityColor[node.severity]} strokeOpacity=".28" strokeDasharray="1 2"/><text x={`${node.x}%`} y={`${node.y + 8}%`} textAnchor="middle" className="node-label">{node.label}</text><text x={`${node.x}%`} y={`${node.y + 12}%`} textAnchor="middle" className="node-detail">{node.detail}</text></g>)}
-      </svg>
-      <div className="legend">{(['critical', 'high', 'medium', 'low'] as Severity[]).map((item) => <span key={item}><i style={{ backgroundColor: severityColor[item] }} />{item}</span>)}</div>
-    </div>
-  )
-}
+const stages = [
+  ['01', 'Collect', 'Continuous registry sync pulls package metadata, versions, maintainer data and historical publish patterns.'],
+  ['02', 'Construct', 'Full dependency resolution builds the dependency graph with typed edges for manifests, tokens, and persistence vectors.'],
+  ['03', 'Traverse', 'Graph queries follow typed edges to compute blast radius, shortest paths, and exposure surfaces in real time.'],
+  ['04', 'Score', 'Risk scoring combines CVSS data, maintainer health signals, and transitive depth to prioritize findings.'],
+]
 
 export default function Page() {
   const [dashboard, setDashboard] = useState(false)
   const [query, setQuery] = useState('event-stream@3.3.6')
-  const [result, setResult] = useState(eventStream)
-  const [flags, setFlags] = useState<FlaggedItem[]>([])
+  const submit = (event: FormEvent) => { event.preventDefault(); setDashboard(true) }
 
-  useEffect(() => {
-    // The preview iframe denies the WebMCP "tools" feature. Do not probe or
-    // register modelContext here: even a guarded access can trigger Chromium's
-    // permissions-policy rejection before JavaScript can catch it. The app's
-    // local event bridge remains available for supported host integrations.
-    const handleRender = (event: Event) => { const detail = (event as CustomEvent<TraceResult>).detail; setResult(detail); setQuery(`${detail.packageName}@${detail.version}`); setDashboard(true) }
-    const handleFlag = (event: Event) => { const detail = (event as CustomEvent<{ packageName: string; reason: string; severity: string }>).detail; setFlags((current) => [{ packageName: detail.packageName, reason: detail.reason, severity: (detail.severity.toLowerCase() as Severity) || 'medium', timestamp: 'just now' }, ...current]) }
-    window.addEventListener('blastradius:render', handleRender); window.addEventListener('blastradius:flag', handleFlag)
-    return () => { window.removeEventListener('blastradius:render', handleRender); window.removeEventListener('blastradius:flag', handleFlag) }
-  }, [])
+  if (dashboard) return <main className="analysis"><header className="site-header"><button className="brand" onClick={() => setDashboard(false)}><span className="brand-orb">○</span> BlastRadius</button><nav><a href="#platform">Platform</a><a href="#graph">Graph model</a><a href="#validation">Validation</a><a href="#architecture">Architecture</a></nav><div className="header-actions"><a href="#contact">Sign in</a><button onClick={() => setDashboard(false)}>Book a demo</button></div></header><section className="dashboard-view"><div className="dashboard-bar"><span>blastradius / trace</span><span><i /> db: blastradius · 8,412 nodes</span></div><div className="trace-title"><span>⌕</span><strong>{query}</strong><b>CRITICAL</b><small>312ms</small></div><div className="trace-stats"><Metric label="PACKAGES AFFECTED" value="21" /><Metric label="SERVICES EXPOSED" value="7" /><Metric label="PERSISTENCE" value="2.73×" accent /><Metric label="MAINTAINER RISK" value="85/100" /></div><div className="trace-path">⌁ &nbsp; event-stream → flatmap-stream → @internal/ui-kit → payments-api <span>+18 paths</span></div><div className="dashboard-placeholder"><span className="eyebrow">LIVE TRACE</span><h1>Impact surface</h1><p>event-stream@3.3.6 reaches 21 packages and 7 production services through 5 typed edge classes.</p><button onClick={() => setDashboard(false)}>← Back to landing</button></div></section></main>
 
-  const trace = (event: FormEvent) => { event.preventDefault(); const next = query.toLowerCase().includes('event-stream') ? eventStream : fallback(query); setResult(next); setDashboard(true) }
-  const flagCurrent = () => window.dispatchEvent(new CustomEvent('blastradius:flag', { detail: { packageName: result.packageName, reason: 'Manual analyst review requested', severity: 'high' } }))
-
-  if (!dashboard) return <main className="shell landing"><div className="scanline" /><header className="topbar"><div className="brand"><span className="brand-mark">/</span> BLAST<span>RADIUS</span></div><span className="status"><i /> SYSTEM ONLINE</span></header><section className="hero"><div className="hero-kicker">NPM SUPPLY-CHAIN INTELLIGENCE <span>v1.0.4</span></div><h1>See the full<br /><em>blast radius.</em></h1><p>Trace how a single compromised dependency can move through your packages, services, and production surface.</p><form className="launch-form" onSubmit={trace}><div className="input-shell"><span>›_</span><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Package name" /><button type="submit">Launch Dashboard <b>→</b></button></div></form><div className="hero-note"><span>●</span> Built for the moments between <strong>npm install</strong> and incident response.</div></section><footer className="landing-footer"><span>BLASTRADIUS / DEPENDENCY RISK ENGINE</span><span>WEBMCP READY <i /></span></footer></main>
-
-  return <main className="shell dashboard"><div className="scanline" /><header className="topbar"><button className="brand brand-button" onClick={() => setDashboard(false)}><span className="brand-mark">/</span> BLAST<span>RADIUS</span></button><div className="dash-meta"><span className="live-dot" /> TRACE SESSION <strong>BR-0842</strong><button className="icon-button" aria-label="Return to landing" onClick={() => setDashboard(false)}>×</button></div></header><section className="dash-content"><div className="dash-intro"><div><span className="eyebrow">TRACE / DEPENDENCY GRAPH</span><h1>{result.packageName}<small>@{result.version}</small></h1></div><form className="search-form" onSubmit={trace}><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search package" /><button type="submit">TRACE <b>↗</b></button></form></div><div className="stats">{[['PACKAGES AFFECTED', result.packagesAffected, 'downstream dependencies'], ['SERVICES EXPOSED', result.servicesExposed, 'production surfaces'], ['PERSISTENCE MULTIPLIER', result.multiplier, 'propagation coefficient'], ['MAINTAINER RISK', `${result.maintainerRisk}/100`, 'trust signal']].map(([label, value, note]) => <div className="stat" key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>)}</div><div className="crumb-row"><span className="eyebrow">ATTACK CHAIN</span><div className="crumbs">{result.path.map((item, index) => <span key={`${item}-${index}`} className={index === 0 ? 'hot' : ''}>{item}{index < result.path.length - 1 && <b>→</b>}</span>)}</div><span className="updated">● {result.updated}</span></div><Graph result={result} onFlag={flagCurrent} /></section><aside className="review-panel"><div className="panel-title"><span><i /> FLAGGED FOR REVIEW</span><b>{flags.length.toString().padStart(2, '0')}</b></div>{flags.length === 0 ? <div className="empty-state">No dependencies flagged.<br /><span>WebMCP review events will appear here.</span></div> : <div className="flag-list">{flags.map((flag, index) => <div className="flag-card" key={`${flag.packageName}-${index}`}><div><strong>{flag.packageName}</strong><span className={`severity ${flag.severity}`}>{flag.severity}</span></div><p>{flag.reason}</p><small>{flag.timestamp} · analyst queue</small></div>)}</div>}</aside><footer className="dash-footer"><span>TRACE COMPLETE / {result.nodes.length} NODES RESOLVED</span><span>MODEL CONTEXT <i /></span></footer></main>
+  return <main className="site"><header className="site-header"><button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}><span className="brand-orb">○</span> BlastRadius</button><nav><a href="#platform">Platform</a><a href="#graph">Graph model</a><a href="#validation">Validation</a><a href="#architecture">Architecture</a></nav><div className="header-actions"><a href="#contact">Sign in</a><button onClick={() => setDashboard(true)}>Book a demo</button></div></header><section className="hero section-grid"><div className="hero-copy"><div className="pill"><span /> Graph traversal on HydraDB</div><h1>See the full blast radius.</h1><p>One compromised npm package reaches further than any lockfile shows. BlastRadius traverses the complete transitive graph in real time — every package, service, maintainer and CI/CD path it can touch.</p><div className="hero-buttons"><button className="primary" onClick={() => setDashboard(true)}>Book a demo <span>→</span></button><a className="secondary" href="#graph">&gt;_ &nbsp;Read the technical brief</a></div></div><div className="hero-facts"><Fact label="REGISTRIES" value="npm · PyPI" /><Fact label="PACKAGES INDEXED" value="10,000" /><Fact label="EDGE TYPES" value="5" /><Fact label="MEDIAN TRAVERSE" value="312ms" accent /></div></section><section className="problem section-grid"><div><span className="eyebrow">THE PROBLEM</span><h2>One stolen npm token reaches thousands of services you don&apos;t operate.</h2></div><div className="problem-cards"><Info title="Exposure is transitive" body="Almost nothing you ship depends on the compromised package directly. The risk lives three and four hops down, in packages no engineer on your team has ever read." /><Info title="Persistence outlives detection" body="Malicious installs write into .git/hooks, .vscode/tasks.json and agent configs. Removing the version does not remove the foothold." /><Info title="Ecosystems are not isolated" body="The same maintainer identity often publishes to npm and PyPI on the same credentials. Scanning one registry measures half the exposure." /></div></section><section id="platform" className="platform"><div className="section-heading"><div><span className="eyebrow">PLATFORM</span><h2>Six analyses on one graph.</h2></div><p>Every capability reads the same dependency graph, so a finding in one view resolves to the same nodes in every other.</p></div><div className="feature-grid">{features.map((feature) => <article className="feature-card" key={feature.title}><span className="feature-icon">{feature.icon}</span><h3>{feature.title}</h3><p>{feature.body}</p></article>)}</div></section><section id="graph" className="graph-model section-grid"><div><span className="eyebrow">GRAPH MODEL</span><h2>Dependencies are one edge type out of five.</h2><p>A dependency tree explains how code arrives. It does not explain how an attacker moves. BlastRadius stores the movement itself as typed edges, so traversal follows tokens, organisations and infected configs the same way it follows a manifest.</p><dl><dt>depends_on</dt><dd>Declared and transitive manifest edges</dd><dt>installs_persistence</dt><dd>Config-file footholds in developer environments</dd><dt>propagates_via</dt><dd>Modelled attack vectors between nodes</dd><dt>shared-npm-token</dt><dd>Publish credentials common to several packages</dd><dt>shared-github-org</dt><dd>Organisation-level blast paths and scopes</dd></dl></div><TraceTree /></section><section id="validation" className="validation"><div className="section-heading"><div><span className="eyebrow">VALIDATION</span><h2>Measured against incidents that already happened.</h2></div></div><div className="validation-grid"><Metric label="TYPOSQUAT DETECTION F1" value="91.0%" accent /><Metric label="MEDIAN FULL-GRAPH TRAVERSAL" value="312ms" accent /><Metric label="PERSISTENCE MULTIPLIER" value="2.73×" accent /><Metric label="DOCUMENTED INCIDENT RECALL" value="100%" accent /></div></section><section id="architecture" className="architecture"><div className="section-heading"><div><span className="eyebrow">ARCHITECTURE</span><h2>From registry to radius in four stages.</h2></div></div><div className="stage-grid">{stages.map(([number, title, body]) => <article className="stage-card" key={number}><strong>{number}</strong><h3>{title}</h3><p>{body}</p></article>)}</div></section><section id="contact" className="closing"><span className="pill"><span /> Graph traversal on HydraDB</span><h2>See your blast radius.</h2><p>Start with a single package query. No installation required.</p><button className="primary" onClick={() => setDashboard(true)}>Launch Dashboard <span>→</span></button></section><footer><div><button className="brand"><span className="brand-orb">○</span> BlastRadius</button><p>Supply-chain security intelligence for the modern software stack.</p></div><div><b>PRODUCT</b><a href="#platform">Platform</a><a href="#graph">Graph model</a><a href="#validation">Validation</a></div><div><b>RESOURCES</b><a href="#architecture">Architecture</a><a href="#graph">Documentation</a><a href="#contact">API</a></div><div><b>COMPANY</b><a href="#contact">About</a><a href="#contact">Contact</a></div></footer></main>
 }
+
+function Fact({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) { return <div className="fact"><span>{label}</span><strong className={accent ? 'accent' : ''}>{value}</strong></div> }
+function Metric({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) { return <div className="metric"><span>{label}</span><strong className={accent ? 'accent' : ''}>{value}</strong></div> }
+function Info({ title, body }: { title: string; body: string }) { return <article><span className="feature-icon">⌁</span><h3>{title}</h3><p>{body}</p></article> }
+function TraceTree() { return <div className="trace-tree"><div>traversal · queryForcefulRelations <span>depth 4 · maxResults 50</span></div><strong>event-stream@3.3.6 <small>d0 · compromised</small></strong><p>└─ flatmap-stream@0.1.1 <small>d1 · depends_on</small></p><p>　└─ @internal/ui-kit@4.2.0 <small>d2 · depends_on</small></p><p>　　├─ checkout-web@1.8.3 <small>d3 · service</small></p><p>　　└─ payments-api@2.0.1 <small>d3 · service</small></p><p>└─ .git/hooks/pre-commit <small>d1 · installs_persistence</small></p><p>└─ npm:dominic-tarr <small>d1 · shared-npm-token</small></p><p className="muted">··· 14 additional paths</p></div> }
